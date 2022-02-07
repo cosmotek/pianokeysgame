@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -64,7 +65,6 @@ class MyHomePage extends StatefulWidget {
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
-const notes = [0, 1, 2, 3, 0, 1, 2, 3, 3, 2, 1, 0, 2, 2, 1, 0];
 const keys = ["1", "2", "3", "4"];
 const songDuration = Duration(seconds: 10);
 
@@ -78,13 +78,20 @@ class _MyHomePageState extends State<MyHomePage> {
   double keyHeight = 175;
   double keyWidth = 100;
 
+  late Random rand;
+  late List<int> notes;
+
   @override
   void initState() {
     super.initState();
 
+    rand = Random(DateTime.now().microsecondsSinceEpoch);
+    notes = List.generate(100, (_) => rand.nextInt(4));
+    print(notes);
+
     RawKeyboard.instance.addListener((value) {
       if (value is RawKeyDownEvent && keys.contains(value.character)) {
-        if (!songComplete) {
+        if (!songComplete && notes[index] == (int.parse(value.character!)-1)) {
           if (index == 0) {
             startController.add(true);
           }
@@ -92,19 +99,20 @@ class _MyHomePageState extends State<MyHomePage> {
           setState(() {
             index++;
           });
+
+          scrollController.scrollTo(
+            index: index,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.ease,
+          );
         }
 
+        // TODO remove this if game mode is timed
         if (index == notes.length) {
            setState(() {
             songComplete = true;
           });
         }
-
-        scrollController.scrollTo(
-          index: index,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.ease,
-        );
       }
     });
   }
