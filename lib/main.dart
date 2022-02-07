@@ -226,6 +226,8 @@ class _MyHomePageState extends State<MyHomePage> {
                     ],
                   ),
                 ),
+
+                // TODO if greater than last in top, show score add dialog
                 songComplete
                   ? Center(
                       child: Container(
