@@ -3,11 +3,20 @@ import 'dart:math';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:get_it/get_it.dart';
+import 'package:pianokeysgame/pianokey.dart';
+import 'package:pianokeysgame/score_database.dart';
+import 'package:pianokeysgame/timer_progressbar.dart';
+import 'leaderboard.dart';
+import 'package:confetti/confetti.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
+GetIt globals = GetIt.instance;
+
 void main() {
+  globals.registerSingleton<ScoreDatabase>(ScoreDatabase());
+
   runApp(const MyApp());
 }
 
@@ -32,7 +41,11 @@ class MyApp extends StatelessWidget {
         // is not restarted.
         primarySwatch: Colors.blue,
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      routes: {
+        "/leaderboard": (context) => LeaderboardPage(),
+        "/home": (context) => const MyHomePage(title: 'Flutter Demo Home Page')
+      },
+      initialRoute: "/home",
       scrollBehavior: NoThumbScrollBehavior().copyWith(scrollbars: false),
     );
   }
@@ -71,8 +84,9 @@ const songDuration = Duration(seconds: 10);
 class _MyHomePageState extends State<MyHomePage> {
   ItemScrollController scrollController = ItemScrollController();
   StreamController<bool> startController = StreamController<bool>();
+  ConfettiController confettiController = ConfettiController();
 
-  int index = 0;
+  int selectedIndex = 0;
   bool songComplete = false;
 
   double keyHeight = 175;
@@ -81,37 +95,53 @@ class _MyHomePageState extends State<MyHomePage> {
   late Random rand;
   late List<int> notes;
 
+  int? errorKey;
+
   @override
   void initState() {
     super.initState();
 
     rand = Random(DateTime.now().microsecondsSinceEpoch);
-    notes = List.generate(100, (_) => rand.nextInt(4));
+    notes = List.generate(songDuration.inSeconds * 20, (_) => rand.nextInt(4));
     print(notes);
 
     RawKeyboard.instance.addListener((value) {
       if (value is RawKeyDownEvent && keys.contains(value.character)) {
-        if (!songComplete && notes[index] == (int.parse(value.character!)-1)) {
-          if (index == 0) {
-            startController.add(true);
+        int keyNumber = (int.parse(value.character!)-1);
+
+        if (!songComplete && errorKey == null) {
+          if (notes[selectedIndex] == keyNumber) {
+            if (selectedIndex == 0) {
+              startController.add(true);
+            }
+
+            setState(() {
+              selectedIndex++;
+            });
+
+            scrollController.scrollTo(
+              index: selectedIndex,
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.ease,
+            );
+          } else {
+            setState(() {
+              errorKey = keyNumber;
+            });
+
+            Future.delayed(const Duration(seconds: 2), () => setState(() {
+              errorKey = null;
+            }));
           }
-
-          setState(() {
-            index++;
-          });
-
-          scrollController.scrollTo(
-            index: index,
-            duration: const Duration(milliseconds: 200),
-            curve: Curves.ease,
-          );
         }
 
         // TODO remove this if game mode is timed
-        if (index == notes.length) {
+        if (selectedIndex == notes.length) {
            setState(() {
             songComplete = true;
           });
+
+          Future.delayed(Duration(seconds: 2), () => confettiController.play());
         }
       }
     });
@@ -162,6 +192,7 @@ class _MyHomePageState extends State<MyHomePage> {
                                   children: [0, 1, 2, 3].map((i) =>
                                     PianoKey(
                                       isNote: notes[index] == i,
+                                      isErrored: selectedIndex == index && errorKey == i,
                                       rowNumber: index,
                                       keyHeight: keyHeight,
                                       keyWidth: keyWidth,
@@ -178,6 +209,18 @@ class _MyHomePageState extends State<MyHomePage> {
                           setState(() {
                             songComplete = true;
                           });
+
+                          Future.delayed(Duration(seconds: 2), () => confettiController.play());
+
+                          globals.get<ScoreDatabase>().addScore(Score(
+                            playerInitials: 'KAM',
+                            score: selectedIndex + 1,
+                            recordedAt: DateTime.now(),
+                          ));
+
+                          Future.delayed(const Duration(seconds: 5), () {
+                            Navigator.of(context).pushNamed("/leaderboard");
+                          });
                         },
                       ),
                     ],
@@ -186,140 +229,35 @@ class _MyHomePageState extends State<MyHomePage> {
                 songComplete
                   ? Center(
                       child: Container(
-                        padding: const EdgeInsets.all(20),
-                        color: Colors.white,
+                        padding: const EdgeInsets.all(40),
+                        color: Colors.lightGreen,
                         child: Text(
-                          "You Win! $index keys pressed",
+                          "You Win! ${selectedIndex+1} keys pressed",
                           style: const TextStyle(fontSize: 30),
                         ),
                       )
                     )
                   : const SizedBox(),
+
+                Align(
+                  alignment: Alignment.center,
+                  child: ConfettiWidget(
+                    confettiController: confettiController,
+                    blastDirectionality: BlastDirectionality.explosive,
+                    colors: const [
+                      Colors.green,
+                      Colors.blue,
+                      Colors.pink,
+                      Colors.orange,
+                      Colors.purple
+                    ], // manually specify the colors to be used/ define a custom shape/path.
+                  ),
+                ),
               ],
             ),
           ),
         );
       },
-    );
-  }
-}
-
-Widget PianoKey({ required bool isNote, required int rowNumber, double keyWidth = 100, double keyHeight = 175 }) =>
-  Container(
-    margin: const EdgeInsets.only(
-      bottom: 0.5,
-      left: 0.3,
-      right: 0.3,
-    ),
-    padding: EdgeInsets.only(
-      top: 0,
-      left: keyWidth * .03,
-      right: keyWidth * .03,
-      bottom: keyHeight * .05,
-    ),
-    decoration: BoxDecoration(
-      borderRadius: const BorderRadius.only(
-        bottomLeft: Radius.circular(5),
-        bottomRight: Radius.circular(5),
-      ),
-      color: isNote
-        ? Colors.blue
-        : Colors.grey[100],
-    ),
-    width: keyWidth,
-    height: keyHeight,
-    child: Container(
-      width: keyWidth,
-      height: keyHeight,
-      decoration: BoxDecoration(
-        borderRadius: const BorderRadius.only(
-          bottomLeft: Radius.circular(5),
-          bottomRight: Radius.circular(5),
-        ),
-        color: isNote
-          ? Colors.lightBlue
-          : Colors.white,
-      ),
-      child: (rowNumber == 0  && isNote)
-        ? const Center(child: Text(
-            "START",
-            style: TextStyle(
-              fontSize: 16,
-              color: Colors.white,
-              fontWeight: FontWeight.w600,
-            )
-          ))
-        : null,
-    ),
-  );
-
-class TimerProgressBar extends StatefulWidget {
-  final Duration duration;
-  final Duration tickSpeed;
-  final double height;
-  final Function onTimeout;
-  final Stream<bool> startStream;
-
-  const TimerProgressBar({
-    Key? key, 
-    required this.duration,
-    this.tickSpeed = const Duration(milliseconds: 5),
-    this.height = 200,
-    required this.onTimeout,
-    required this.startStream,
-  }) : super(key: key);
-
-  @override
-  State<StatefulWidget> createState() => TimerProgressBarState();
-}
-
-class TimerProgressBarState extends State<TimerProgressBar> {
-  late int totalTicks;
-  late int ticks;
-
-  late StreamController<double> positionStream;
-
-  @override
-  void initState() {
-    super.initState();
-
-    totalTicks = widget.duration.inMilliseconds ~/ widget.tickSpeed.inMilliseconds;
-    ticks = totalTicks;
-    positionStream = StreamController<double>();
-
-    positionStream.add(1.0);
-    widget.startStream.listen((started) {
-      if (started) {
-        Timer.periodic(widget.tickSpeed, (timer) {
-          if (ticks <= 0) {
-            timer.cancel();
-            widget.onTimeout();
-          } else {
-            ticks -= 1;
-            positionStream.add(ticks / totalTicks);
-          }
-        });
-      }
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return RotatedBox(
-      quarterTurns: -1,
-      child: StreamBuilder(
-        stream: positionStream.stream,
-        builder: (context, stream) { 
-          return SizedBox(
-            height: 20,
-            width: widget.height,
-            child: LinearProgressIndicator(
-              value: (stream.data as double?) ?? 0,
-              minHeight: 20,
-            )
-          );
-        },
-      ),
     );
   }
 }
